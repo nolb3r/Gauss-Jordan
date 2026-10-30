@@ -127,7 +127,7 @@ table.mat td.contra { background: #FADBD8 !important; }
 .var-card .x { font-family: 'JetBrains Mono', monospace; font-size: 1.45rem; font-weight: 700; color: #2B2B2B; margin-top: 4px; }
 
 .verif { font-family: 'JetBrains Mono', monospace; font-size: .92rem; padding: 6px 12px;
-         border-radius: 10px; background: #fff; border: 1px solid #EADBC8; margin: 5px 0; }
+         border-radius: 10px; background: #fff; border: 1px solid #EADBC8; margin: 5px 0; overflow-wrap: anywhere; }
 .verif .ok { color: #1E8449; font-weight: 700; }
 .verif .no { color: #C0392B; font-weight: 700; }
 
@@ -215,6 +215,22 @@ def latex_param(constante, terminos, nombres, dec):
         else:
             partes.append(("- " if k < 0 else "+ ") + var)
     return " ".join(partes)
+
+
+def mostrar_comprobacion(A, b, x, dec):
+    """Sustituye x en cada ecuación original y muestra la operación completa."""
+    n = len(x)
+    resultados = verificar(A, b, x)
+    for i, (izq, bi, ok) in enumerate(resultados):
+        sust = " + ".join(f"({a_texto(A[i][j], dec)})({a_texto(x[j], dec)})" for j in range(n))
+        marca = '<span class="ok">✔ correcto</span>' if ok else '<span class="no">✘ incorrecto</span>'
+        st.markdown(f'<div class="verif">Ec. {i + 1}: {sust} = <b>{a_texto(izq, dec)}</b>'
+                    f' &nbsp;=&nbsp; b<sub>{i + 1}</sub> = {a_texto(bi, dec)} &nbsp; {marca}</div>',
+                    unsafe_allow_html=True)
+    if all(ok for *_, ok in resultados):
+        st.success("✔ Se cumplen todas las ecuaciones del sistema original.")
+    else:
+        st.error("La comprobación falló.")
 
 
 def titulo_seccion(num, texto):
@@ -396,13 +412,7 @@ with tab_resolver:
                         unsafe_allow_html=True)
 
             with st.expander("✔️ Comprobación: sustituir la solución en cada ecuación", expanded=True):
-                for i, (izq, bi, ok) in enumerate(verificar(A, b, r["solucion"])):
-                    sust = " + ".join(f"({a_texto(A[i][j], dec)})({a_texto(r['solucion'][j], dec)})"
-                                      for j in range(n))
-                    marca = '<span class="ok">✔ correcto</span>' if ok else '<span class="no">✘</span>'
-                    st.markdown(f'<div class="verif">Ec. {i + 1}: {sust} = <b>{a_texto(izq, dec)}</b>'
-                                f' &nbsp;=&nbsp; b<sub>{i + 1}</sub> = {a_texto(bi, dec)} &nbsp; {marca}</div>',
-                                unsafe_allow_html=True)
+                mostrar_comprobacion(A, b, r["solucion"], dec)
 
         elif r["tipo"] == "infinitas":
             libres = r["columnas_libres"]
@@ -422,19 +432,34 @@ with tab_resolver:
                     lineas.append(f"x_{{{j + 1}}} = {latex_param(c, t, nombres, dec)}")
             st.latex(r"\begin{cases}" + r" \\ ".join(lineas) + r"\end{cases}")
 
-            # Una solución particular (todos los parámetros = 0) para comprobar
-            x0 = [Fraction(0)] * n
-            for j, v in r["parametrica"].items():
-                if v is not None:
-                    x0[j] = v[0]
-            with st.expander("✔️ Ejemplo: solución particular con todos los parámetros = 0", expanded=True):
-                st.markdown(" &nbsp;,&nbsp; ".join(f"x<sub>{j + 1}</sub> = <b>{html_num(x0[j], dec)}</b>"
-                                         for j in range(n)), unsafe_allow_html=True)
-                todas_ok = all(ok for *_, ok in verificar(A, b, x0))
-                if todas_ok:
-                    st.success("Al sustituirla, se cumplen todas las ecuaciones del sistema.")
-                else:
-                    st.error("La comprobación falló.")
+            # Comprobación: el usuario elige valores para los parámetros t
+            with st.expander("✔️ Comprobación: elige valores para los parámetros y sustituye", expanded=True):
+                st.caption("Escoge cualquier valor para cada parámetro t. Con cualquier valor, "
+                           "las ecuaciones originales se deben cumplir.")
+                cols_t = st.columns(min(len(libres), 5))
+                valores_t = {}
+                for k, j in enumerate(libres):
+                    texto_t = cols_t[k % len(cols_t)].text_input(
+                        f"t{k + 1} =", value="0", key=f"t_{k}_{m}_{n}")
+                    try:
+                        valores_t[j] = leer_numero(texto_t)
+                    except ValueError:
+                        st.warning(f"t{k + 1}: «{texto_t}» no es un número, se usará 0.")
+                        valores_t[j] = Fraction(0)
+
+                # Calcular x a partir de los parámetros elegidos
+                xp = [Fraction(0)] * n
+                for j in libres:
+                    xp[j] = valores_t[j]
+                for j, v in r["parametrica"].items():
+                    if v is not None:
+                        c, t = v
+                        xp[j] = c + sum(k * valores_t[l] for l, k in t.items())
+
+                st.markdown("Solución particular: " + " &nbsp;,&nbsp; ".join(
+                    f"x<sub>{j + 1}</sub> = <b>{html_num(xp[j], dec)}</b>" for j in range(n)),
+                    unsafe_allow_html=True)
+                mostrar_comprobacion(A, b, xp, dec)
 
         else:
             fc = r["fila_contradiccion"]
